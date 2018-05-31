@@ -1,0 +1,13 @@
+Index: dnsmasq-2.78/src/lease.c
+===================================================================
+--- dnsmasq-2.78.orig/src/lease.c
++++ dnsmasq-2.78/src/lease.c
+@@ -978,7 +978,7 @@ void lease_set_hostname(struct dhcp_leas
+ 	  else
+ 	    {
+ 	      if (!new_name || !lease_tmp->hostname || !hostname_isequal(lease_tmp->hostname, new_name) )
+-		continue; 
++		my_syslog(MS_DHCP | LOG_INFO, _("lease_tmp->hostname equal new_name")); 
+ 	    }
+ 
+ 	  if (lease->flags & (LEASE_TA | LEASE_NA))

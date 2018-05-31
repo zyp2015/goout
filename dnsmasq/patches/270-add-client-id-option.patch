@@ -1,0 +1,62 @@
+Index: dnsmasq-2.78/src/dnsmasq.h
+===================================================================
+--- dnsmasq-2.78.orig/src/dnsmasq.h
++++ dnsmasq-2.78/src/dnsmasq.h
+@@ -672,6 +672,8 @@ struct frec {
+ #define OPTION_USER_CLASS_FILE "/tmp/option_77"
+ #define OPTION_VENDOR_ID_FILE_TMP  "/tmp/.option_60"
+ #define OPTION_USER_CLASS_FILE_TMP "/tmp/.option_77"
++#define OPTION_CLIENT_ID_FILE "/tmp/option_61"
++#define OPTION_CLIENT_ID_FILE_TMP "/tmp/.option_61"
+ 
+ #endif
+ struct dhcp_lease {
+Index: dnsmasq-2.78/src/lease.c
+===================================================================
+--- dnsmasq-2.78.orig/src/lease.c
++++ dnsmasq-2.78/src/lease.c
+@@ -343,6 +343,10 @@ static int option_vid_uclass_op(unsigned
+ 	if(get_macaddr_and_option(OPTION_USER_CLASS_FILE,macaddr,buffer) == 1){
+ 		write_option_tmp_file(OPTION_USER_CLASS_FILE_TMP,buffer);
+ 	}
++	memset(buffer,0x0,1024);
++	if(get_macaddr_and_option(OPTION_CLIENT_ID_FILE,macaddr,buffer) == 1){
++		write_option_tmp_file(OPTION_CLIENT_ID_FILE_TMP,buffer);
++	}
+ }
+ 
+ #endif
+@@ -501,6 +505,7 @@ void lease_update_file(time_t now)
+ #ifdef CDSKYSOFT_TR_OPTION_VENDOR_ID_AND_USER_CLASS
+     rename_tmp_to_file(OPTION_USER_CLASS_FILE_TMP,OPTION_USER_CLASS_FILE,daemon->lease_file);
+     rename_tmp_to_file(OPTION_VENDOR_ID_FILE_TMP,OPTION_VENDOR_ID_FILE,daemon->lease_file);
++    rename_tmp_to_file(OPTION_CLIENT_ID_FILE_TMP,OPTION_CLIENT_ID_FILE,daemon->lease_file);
+ #endif
+   send_alarm(next_event, now);
+ }
+Index: dnsmasq-2.78/src/rfc2131.c
+===================================================================
+--- dnsmasq-2.78.orig/src/rfc2131.c
++++ dnsmasq-2.78/src/rfc2131.c
+@@ -1569,6 +1569,21 @@ size_t dhcp_reply(struct dhcp_context *c
+                 //memcpy(lease_tmp->option_user_class,ucp_tmp,len_tmp);
+               }
+           }
++          option_tmp = NULL;
++          if ((option_tmp = option_find(mess, sz, OPTION_CLIENT_ID, 1))){
++              int client_id_len_tmp = option_len(option_tmp);
++              unsigned char *client_id_ucp_tmp = option_ptr(option_tmp, 0);
++              /* If the user-class option started as counted strings, the first byte will be zero. */
++              if (client_id_len_tmp != 0 && client_id_ucp_tmp[0] == 0)
++                  client_id_ucp_tmp++, client_id_len_tmp--;
++              if(client_id_len_tmp > 0){
++              	char outstring[512] = {0};
++              	char *poutstring = outstring;
++              	for(int index= 0; index < client_id_len_tmp;index++)
++              		poutstring+=sprintf(poutstring,"%.2x",client_id_ucp_tmp[index]);
++              	write_option_to_file(OPTION_CLIENT_ID_FILE,mess->chaddr,mess->hlen,outstring,strlen(outstring));
++              }
++          }
+       }
+ #endif
+ 

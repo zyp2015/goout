@@ -1,0 +1,130 @@
+Index: dnsmasq-2.78/src/rfc2131.c
+===================================================================
+--- dnsmasq-2.78.orig/src/rfc2131.c
++++ dnsmasq-2.78/src/rfc2131.c
+@@ -63,6 +63,29 @@ static void pxe_misc(struct dhcp_packet
+ static int prune_vendor_opts(struct dhcp_netid *netid);
+ static struct dhcp_opt *pxe_opts(int pxe_arch, struct dhcp_netid *netid, struct in_addr local, time_t now);
+ struct dhcp_boot *find_boot(struct dhcp_netid *netid);
++
++#ifdef SKYSOFT_TR_SUPPORT
++#define NOTIFY_LOG_FILE "/tmp/notify_dynamic.log"
++#define TR_NOTIFY_MAX_LEN 2048
++#ifdef DEBUG_TR_NOTIFY
++void log_notify(const char *format, ...)
++{
++       FILE *logfd = NULL;
++       va_list args;
++
++       logfd = fopen(NOTIFY_LOG_FILE, "a");
++       if(logfd)
++       {
++               fprintf(logfd, format, args);
++               fprintf(logfd, "%s", "\n");
++               fclose(logfd);
++       }
++}
++#else
++#define log_notify(...); 
++#endif
++#endif
++ 
+ static int pxe_uefi_workaround(int pxe_arch, struct dhcp_netid *netid, struct dhcp_packet *mess, struct in_addr local, time_t now, int pxe);
+ static void apply_delay(u32 xid, time_t recvtime, struct dhcp_netid *netid);
+ 
+@@ -101,6 +124,9 @@ size_t dhcp_reply(struct dhcp_context *c
+   unsigned char *class = NULL;
+ #endif
+ 
++#ifdef SKYSOFT_TR_SUPPORT
++  char notify_cmd[TR_NOTIFY_MAX_LEN]="";
++#endif
+   subnet_addr.s_addr = override.s_addr = 0;
+ 
+   /* set tag with name == interface */
+@@ -173,6 +199,14 @@ size_t dhcp_reply(struct dhcp_context *c
+ 		      cpewan_id.net = "cpewan-id";
+ 		      cpewan_id.next = netid;
+ 		      netid = &cpewan_id;
++#ifdef SKYSOFT_TR_SUPPORT
++                     memset(notify_cmd, 0x00, sizeof(notify_cmd));
++                     sprintf(notify_cmd,
++                        "/oneagent/senducitocli http://127.0.0.1:1234/value/change/group/ \"%s;\"",
++                        "Device.ManagementServer.ManageableDeviceNumberOfEntries ");
++                     system(notify_cmd);
++                     log_notify(notify_cmd);
++#endif
+ 		    }
+ 		  break;
+ 		}
+@@ -253,6 +287,37 @@ size_t dhcp_reply(struct dhcp_context *c
+ 
+       /* find mac to use for logging and hashing */
+       emac = extended_hwaddr(mess->htype, mess->hlen, mess->chaddr, clid_len, clid, &emac_len);
++#ifdef SKYSOFT_TR_SUPPORT
++   #ifdef HAVE_SCRIPT
++      FILE *optionfp = NULL;
++      char client_mac[64] = {0};
++      char filename[64] = {0};
++      char newoui[40] = {0};
++      char newserial[40] = {0};
++      char newclass[40] = {0};
++      int count = 0, slen = 0, olen = 0, clen = 0;
++      if (oui != NULL && serial != NULL && class != NULL){
++         print_mac(client_mac, emac, emac_len);
++         sprintf(filename, "/tmp/%s_option125", client_mac);
++         optionfp = fopen(filename, "w");
++         if (optionfp != NULL){
++            olen = oui[1];
++            slen = serial[1];
++            clen = class[1];
++            for (count = 0; count < olen; count ++)
++               newoui[count] = oui[count+2];
++            for (count = 0; count < slen; count ++)
++               newserial[count] = serial[count+2];
++            for (count = 0; count < clen; count ++)
++               newclass[count] = class[count+2];
++            fprintf(optionfp, "oui=%s\n", newoui);
++            fprintf(optionfp, "serial=%s\n", newserial);
++            fprintf(optionfp, "class=%s\n", newclass);
++            fclose(optionfp);
++         }
++      }
++   #endif
++#endif
+     }
+   
+   for (mac = daemon->dhcp_macs; mac; mac = mac->next)
+@@ -993,7 +1058,15 @@ size_t dhcp_reply(struct dhcp_context *c
+ 	lease_prune(lease, now);
+       else
+ 	message = _("unknown lease");
+-
++#ifdef SKYSOFT_TR_SUPPORT
++      memset(notify_cmd, 0x00, sizeof(notify_cmd));
++      sprintf(notify_cmd,
++        "/oneagent/senducitocli http://127.0.0.1:1234/value/change/group/ \"%s;\"",
++        "Device.DHCPv4.Server.Pool.1.ClientNumberOfEntries");
++      system(notify_cmd);
++      log_notify("DHCPRELEASE");
++      log_notify(notify_cmd);
++#endif 
+       log_packet("DHCPRELEASE", &mess->ciaddr, emac, emac_len, iface_name, NULL, message, mess->xid);
+ 	
+       return 0;
+@@ -1073,6 +1146,15 @@ size_t dhcp_reply(struct dhcp_context *c
+ 
+       log_tags(tagif_netid, ntohl(mess->xid));
+       apply_delay(mess->xid, recvtime, tagif_netid);
++#ifdef SKYSOFT_TR_SUPPORT
++      memset(notify_cmd, 0x00, sizeof(notify_cmd));
++      sprintf(notify_cmd,
++        "/oneagent/senducitocli http://127.0.0.1:1234/value/change/group/ \"%s;\"",
++        "Device.DHCPv4.Server.Pool.1.ClientNumberOfEntries");
++      system(notify_cmd);
++      log_notify("DHCPOFFER");
++      log_notify(notify_cmd);
++#endif
+       log_packet("DHCPOFFER" , &mess->yiaddr, emac, emac_len, iface_name, NULL, NULL, mess->xid);
+       
+       time = calc_time(context, config, option_find(mess, sz, OPTION_LEASE_TIME, 4));

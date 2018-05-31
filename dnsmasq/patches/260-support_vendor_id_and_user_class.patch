@@ -1,0 +1,325 @@
+Index: dnsmasq-2.78/src/dnsmasq.h
+===================================================================
+--- dnsmasq-2.78.orig/src/dnsmasq.h
++++ dnsmasq-2.78/src/dnsmasq.h
+@@ -664,6 +664,16 @@ struct frec {
+ #define LEASE_TA            64  /* IPv6 temporary lease */
+ #define LEASE_HAVE_HWADDR  128  /* Have set hwaddress */
+ 
++#define CDSKYSOFT_TR_OPTION_VENDOR_ID_AND_USER_CLASS
++
++#ifdef CDSKYSOFT_TR_OPTION_VENDOR_ID_AND_USER_CLASS
++#include <unistd.h>
++#define OPTION_VENDOR_ID_FILE "/tmp/option_60"
++#define OPTION_USER_CLASS_FILE "/tmp/option_77"
++#define OPTION_VENDOR_ID_FILE_TMP  "/tmp/.option_60"
++#define OPTION_USER_CLASS_FILE_TMP "/tmp/.option_77"
++
++#endif
+ struct dhcp_lease {
+   int clid_len;          /* length of client identifier */
+   unsigned char *clid;   /* clientid */
+Index: dnsmasq-2.78/src/lease.c
+===================================================================
+--- dnsmasq-2.78.orig/src/lease.c
++++ dnsmasq-2.78/src/lease.c
+@@ -239,13 +239,123 @@ static void ourprintf(int *errp, char *f
+     *errp = errno;
+   va_end(ap);
+ }
++#ifdef CDSKYSOFT_TR_OPTION_VENDOR_ID_AND_USER_CLASS
++// 1 got ,0 does not got
++static int get_macaddr_and_option(char *filename,unsigned char *macaddr,char *output)
++{
++	FILE *fp = NULL;
++	int result = 0;
++	char buffer[1024] = {0};
++	if(filename && macaddr && output){
++		//if(access(filename)){
++			//file DOESN'T EXISIT!
++		//	goto out;
++		//}
++
++		fp = fopen(filename,"r");
++		if(fp == NULL)
++			goto out;
++
++		while(!feof(fp)){
++			fgets(buffer,1024,fp);
++			if(strstr(buffer,macaddr)!= NULL){
++				result = 1;
++				memcpy(output,buffer,1024);
++				fclose(fp);
++				goto out;
++			}
++			memset(buffer,0x0,1024);
++		}
++
++	}
++	fclose(fp);
++out:
++	return result;
++}
++static void write_option_tmp_file(char *filename,char *info)
++{
++	FILE *fp = NULL;
++	if(!filename)
++		return;
++	if((fp = fopen(filename,"a+")) !=NULL){
++		fprintf(fp,"%s",info);
++		fflush(fp);
++		fsync(fileno(fp));
++		fclose(fp);
++	}
++}
++static int traverse_lease_file_macaddr(char *macaddr,char *lease_file)
++{
++	FILE *fp = NULL;
++	int result = 0;
++	char buffer[1024] = {0};
++	if((fp = fopen(lease_file,"r")) != NULL){
++		while(!feof(fp)){
++			fgets(buffer,1024,fp);
++			if(strstr(buffer,macaddr) != NULL){
++				fclose(fp);
++				result = 1;
++				goto out;
++			}
++		}
++	}
++out:
++	return result;
++}
++static void rename_tmp_to_file(char *infile,char *outfile,char *lease_file)
++{
++	FILE *fp_t = NULL;
++	char macaddr[64] = {0};
++	char buffer[1024] = {0},string_buffer[1024] = {0};
++	char *q = buffer;
++	char *p;
++	int i=0;
++	if(access(infile,0)==0) {
++		rename(infile,outfile);system("echo =======infile===outfile========= >/dev/null");
++	}else {
++		if((fp_t = fopen(outfile,"r")) != NULL){
++			while(fgets(string_buffer,1024,fp_t)!=NULL){
++				strcpy(buffer,string_buffer);
++				//fgets(buffer,1024,fp_t);
++				i++;char buffer2[1024] = {0};sprintf(buffer2,"echo %d >/dev/null",i);system(buffer2);
++			}
++			if(i==1){
++				p = strstr(buffer,"=");
++				strncpy(macaddr,buffer,p-q);char buffer1[1024] = {0};sprintf(buffer1,"echo %s >/dev/null",macaddr);system(buffer1);
++				if(traverse_lease_file_macaddr(macaddr,lease_file) == 0){
++					fclose(fp_t);
++					fp_t = fopen(outfile,"w");
++					fclose(fp_t);
++				}
++			}
++		}
++		
++	}
++}
++
++static int option_vid_uclass_op(unsigned char *macaddr)
++{
++	char buffer[1024] = {0};
++	if(get_macaddr_and_option(OPTION_VENDOR_ID_FILE,macaddr,buffer) == 1){
++		write_option_tmp_file(OPTION_VENDOR_ID_FILE_TMP,buffer);
++	}
++	memset(buffer,0x0,1024);
++	if(get_macaddr_and_option(OPTION_USER_CLASS_FILE,macaddr,buffer) == 1){
++		write_option_tmp_file(OPTION_USER_CLASS_FILE_TMP,buffer);
++	}
++}
++
++#endif
+ 
+ void lease_update_file(time_t now)
+ {
+   struct dhcp_lease *lease;
+   time_t next_event;
+   int i, err = 0;
+-
++#ifdef CDSKYSOFT_TR_OPTION_VENDOR_ID_AND_USER_CLASS
++  unsigned char macaddr[64] = {0};
++  unsigned char *pmacaddr = macaddr;
++#endif
+   if (file_dirty != 0 && daemon->lease_stream)
+     {
+       errno = 0;
+@@ -272,10 +382,24 @@ void lease_update_file(time_t now)
+ 	  for (i = 0; i < lease->hwaddr_len; i++)
+ 	    {
+ 	      ourprintf(&err, "%.2x", lease->hwaddr[i]);
++#ifdef CDSKYSOFT_TR_OPTION_VENDOR_ID_AND_USER_CLASS
++            pmacaddr += sprintf(pmacaddr,"%.2x",lease->hwaddr[i]);
++#endif
+ 	      if (i != lease->hwaddr_len - 1)
+-		ourprintf(&err, ":");
++#ifdef CDSKYSOFT_TR_OPTION_VENDOR_ID_AND_USER_CLASS
++          {
++#endif
++		        ourprintf(&err, ":");
++#ifdef CDSKYSOFT_TR_OPTION_VENDOR_ID_AND_USER_CLASS
++            pmacaddr+=sprintf(pmacaddr,":");
++          }
++#endif
+ 	    }
+-	  
++
++#ifdef CDSKYSOFT_TR_OPTION_VENDOR_ID_AND_USER_CLASS
++	   option_vid_uclass_op(macaddr);
++    memset(macaddr,0x0,64);pmacaddr=macaddr;
++#endif	
+ 	  inet_ntop(AF_INET, &lease->addr, daemon->addrbuff, ADDRSTRLEN); 
+ 
+ 	  ourprintf(&err, " %s ", daemon->addrbuff);
+@@ -374,7 +498,10 @@ void lease_update_file(time_t now)
+ 		daemon->lease_file, strerror(err),
+ 		(unsigned int)difftime(next_event, now));
+     }
+-
++#ifdef CDSKYSOFT_TR_OPTION_VENDOR_ID_AND_USER_CLASS
++    rename_tmp_to_file(OPTION_USER_CLASS_FILE_TMP,OPTION_USER_CLASS_FILE,daemon->lease_file);
++    rename_tmp_to_file(OPTION_VENDOR_ID_FILE_TMP,OPTION_VENDOR_ID_FILE,daemon->lease_file);
++#endif
+   send_alarm(next_event, now);
+ }
+ 
+Index: dnsmasq-2.78/src/rfc2131.c
+===================================================================
+--- dnsmasq-2.78.orig/src/rfc2131.c
++++ dnsmasq-2.78/src/rfc2131.c
+@@ -89,6 +89,95 @@ void log_notify(const char *format, ...)
+ static int pxe_uefi_workaround(int pxe_arch, struct dhcp_netid *netid, struct dhcp_packet *mess, struct in_addr local, time_t now, int pxe);
+ static void apply_delay(u32 xid, time_t recvtime, struct dhcp_netid *netid);
+ 
++#ifdef CDSKYSOFT_TR_OPTION_VENDOR_ID_AND_USER_CLASS
++static void build_up_macaddr(char *in,int len,char *out)
++{
++	int i;
++	char macaddr[64] = {0};
++	char *pmacaddr = macaddr;
++	if(in && len >0 && out){
++	  	for (i = 0; i < len; i++){
++	  		pmacaddr += sprintf(pmacaddr,"%.2x",in[i]);
++	      	if (i != len - 1)
++	      		pmacaddr +=sprintf(pmacaddr,":");
++	    }
++	    memcpy(out,macaddr,64);
++	}
++}
++static FILE * open_file(char *name)
++{
++	FILE *fp = NULL;
++	if(name){
++		fp = fopen(name,"a+");
++	}
++	return fp;
++}
++static void write_file(FILE *fp,char*mac,char *info)
++{
++	if(fp && mac && info){
++		fprintf(fp,"%s=%s\n",mac,info);
++	}
++}
++static void close_file(FILE *fp)
++{
++	if(fp){
++		fflush(fp);
++		fsync(fileno(fp));
++		fclose(fp);
++		fp = NULL;
++	}
++}
++// 1 exist ,0 does not exist
++static int check_macaddr_exist(char *filename,char *macaddr)
++{
++	FILE *fp = NULL;
++	int result = 0;
++	char buffer[1024] = {0};
++	if(filename && macaddr){
++		//if(access(filename)){
++			//file DOESN'T EXISIT!
++		//	goto out;
++		//}
++
++		fp = fopen(filename,"r");
++		if(fp == NULL)
++			goto out;
++
++		while(!feof(fp)){
++			fgets(buffer,1024,fp);
++			if(strstr(buffer,macaddr)!= NULL){
++				result = 1;
++				fclose(fp);
++				goto out;
++			}
++			memset(buffer,0x0,1024);
++		}
++
++	}
++	fclose(fp);
++out:
++	return result;
++}
++static void write_option_to_file(char *filename,char *hwaddr,char*hlen,char *option,int option_len)
++{
++	char macaddr[64] = {0};
++	char option_tmp[1024] = {0};
++	FILE *fp = NULL;
++	if(hwaddr && hlen > 0 && filename && option && option_len > 0){
++		build_up_macaddr(hwaddr,hlen,macaddr);
++		if(strlen(macaddr) > 0){
++			if(check_macaddr_exist(filename,macaddr) == 0){
++				fp = open_file(filename);
++				if(fp){
++					memcpy(option_tmp,option,option_len);
++					write_file(fp,macaddr,option_tmp);
++					close_file(fp);
++				}
++			}
++		}
++	}
++}
++#endif
+ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
+ 		  size_t sz, time_t now, int unicast_dest, int loopback,
+ 		  int *is_inform, int pxe, struct in_addr fallback, time_t recvtime)
+@@ -1455,7 +1544,34 @@ size_t dhcp_reply(struct dhcp_context *c
+ 	  
+ 	  time = calc_time(context, config, option_find(mess, sz, OPTION_LEASE_TIME, 4));
+ 	  lease_set_hwaddr(lease, mess->chaddr, clid, mess->hlen, mess->htype, clid_len, now, do_classes);
+-	  
++
++#ifdef CDSKYSOFT_TR_OPTION_VENDOR_ID_AND_USER_CLASS
++      struct dhcp_lease * lease_tmp = lease_find_by_client(mess->chaddr, mess->hlen, mess->htype, NULL, 0);
++      if(lease_tmp){
++          unsigned char *option_tmp;
++          if( (option_tmp = option_find(mess, sz, OPTION_VENDOR_ID, 1))){
++              if(option_len(option_tmp) > 0){
++              	write_option_to_file(OPTION_VENDOR_ID_FILE,mess->chaddr,mess->hlen,option_ptr(option_tmp, 0),option_len(option_tmp));
++                //memset(lease_tmp->option_vendor_id,0x0,OPTION_LENGTH);
++                //memcpy(lease_tmp->option_vendor_id,option_ptr(option_tmp, 0),option_len(option_tmp));
++              }
++          }
++          option_tmp = NULL;
++          if ((option_tmp = option_find(mess, sz, OPTION_USER_CLASS, 1))){
++              int len_tmp = option_len(option_tmp);
++              unsigned char *ucp_tmp = option_ptr(option_tmp, 0);
++              /* If the user-class option started as counted strings, the first byte will be zero. */
++              if (len_tmp != 0 && ucp_tmp[0] == 0)
++                  ucp_tmp++, len_tmp--;
++              if(len_tmp > 0){
++              	write_option_to_file(OPTION_USER_CLASS_FILE,mess->chaddr,mess->hlen,ucp_tmp,len_tmp);
++                //memset(lease_tmp->option_user_class,0x0,OPTION_LENGTH);
++                //memcpy(lease_tmp->option_user_class,ucp_tmp,len_tmp);
++              }
++          }
++      }
++#endif
++
+ 	  /* if all the netids in the ignore_name list are present, ignore client-supplied name */
+ 	  if (!hostname_auth)
+ 	    {

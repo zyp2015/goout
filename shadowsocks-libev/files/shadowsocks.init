@@ -1,0 +1,98 @@
+#!/bin/sh /etc/rc.common
+ 
+START=95
+ 
+SERVICE_DAEMONIZE=1
+CONFIG=/etc/shadowsocks.json
+DNS=8.8.8.8:53
+TUNNEL_PORT=5353
+
+parse_config() {
+        local server_ip server_port  local_port password method fast_open
+        server_ip=`uci get shadowsocks.server.server_ip`
+        server_port=`uci get shadowsocks.server.server_port`
+        local_port=`uci get shadowsocks.server.local_port`
+        password=`uci get shadowsocks.server.password`
+        method=`uci get shadowsocks.server.method`
+        fast_open=`uci get shadowsocks.server.fast_open`
+        customize=`uci get shadowsocks.server.customize`
+        echo -e "{" > $CONFIG
+        echo -e "\t\"server\":\"$server_ip\"," >>$CONFIG
+        echo -e "\t\"server_port\":\"$server_port\"," >>$CONFIG
+        echo -e "$customize" >>$CONFIG
+        echo -e "\t\"local_address\":\"0.0.0.0\"," >>$CONFIG
+        echo -e "\t\"local_port\":\"$local_port\"," >>$CONFIG
+        echo -e "\t\"password\":\"$password\"," >>$CONFIG
+        echo -e "\t\"method\":\"$method\"," >>$CONFIG
+        echo -e "\t\"timeout\":300," >>$CONFIG
+        echo -e "\t\"fast_open\":$fast_open" >>$CONFIG
+        echo -e "}" >> $CONFIG
+}
+
+set_firewall() {
+        local local_port ssr_pre_exist ssr_out_exist ipset_exist
+        local_port=`uci get shadowsocks.server.local_port`
+        ssr_pre_exist=`iptables-save -t nat | grep ssr_rule_pre`
+        ssr_out_exist=`iptables-save -t nat | grep ssr_rule_out`
+        ipset_exist=`ipset list | grep gfwlist`
+        [ -z "$ipset_exist" ] && ipset -N gfwlist iphash
+
+        [ -z "$ssr_pre_exist" ] && {
+                iptables -t nat -I PREROUTING -p tcp -m set --match-set gfwlist dst -m comment --comment "ssr_rule_pre" -j REDIRECT --to-port $local_port
+        }
+
+        [ -z "$ssr_out_exist" ] && {
+                iptables -t nat -I OUTPUT -p tcp -m set --match-set gfwlist dst -m comment --comment "ssr_rule_out" -j REDIRECT --to-port $local_port
+        }
+
+}
+
+rm_firewall() {
+	local local_port=`uci get shadowsocks.server.local_port`
+	iptables -t nat -D PREROUTING -p tcp -m set --match-set gfwlist dst -m comment --comment "ssr_rule_pre" -j REDIRECT --to-port $local_port
+	iptables -t nat -D OUTPUT -p tcp -m set --match-set gfwlist dst -m comment --comment "ssr_rule_out" -j REDIRECT --to-port $local_port
+}
+
+wget_gfwlist() {
+        [ ! -e "/etc/dnsmasq.d/dnsmasq_gfwlist_ipset.conf" ] &&{
+                wget -P /etc/dnsmasq.d/ --no-check-certificate https://cokebar.github.io/gfwlist2dnsmasq/dnsmasq_gfwlist_ipset.conf
+        }
+}
+
+update_gfwlist_by_crontab() {
+	[ ! -f "/etc/crontabs/shadowsocks" ] && {
+	echo "0 3 * * * wget -P /etc/dnsmasq.d/ --no-check-certificate https://cokebar.github.io/gfwlist2dnsmasq/dnsmasq_gfwlist_ipset.conf" >/etc/crontabs/shadowsocks
+	echo "0 */1 * * * /lib/shadowsocks/watch_shadowsocks.sh">>/etc/crontabs/shadowsocks
+	}
+}
+
+start() {
+	
+	local enabled=`uci get shadowsocks.server.enabled`
+	if [ $enabled = "0" ] ;then
+		/etc/init.d/shadowsocks stop
+		rm_firewall
+		exit 0
+	else
+		update_gfwlist_by_crontab
+	        parse_config
+        	# Proxy Mode
+        	service_start /usr/bin/ss-redir -c $CONFIG -v -u
+        	# Tunnel
+        	service_start /usr/bin/ss-local -c $CONFIG -l 23456
+        	# dns to socks
+        	service_start /usr/bin/dns2socks 127.0.0.1:23456 8.8.8.8 127.0.0.1:5353
+        	set_firewall
+        	wget_gfwlist
+        	/etc/init.d/dnsmasq restart
+	fi
+}
+ 
+stop() {
+        # Proxy Mode
+        service_stop /usr/bin/ss-redir
+        # Tunnel
+        service_stop /usr/bin/ss-local
+        # dns to socks                
+        service_stop /usr/bin/dns2socks
+}

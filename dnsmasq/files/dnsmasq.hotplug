@@ -1,0 +1,30 @@
+#!/bin/sh
+
+[ "$ACTION" = ifup ] && [ "$INTERFACE" = "lan" ] && {
+		local link_status
+		local lan_portid_range
+		local board_name
+		
+		board_name=`cat /tmp/sysinfo/board_name | awk '{printf $0}'`
+		case "${board_name}" in
+			"rt4230w-d187-rev5" | \
+			"rt4230w-d187-rev6" | \
+			"rt4230w-d187-rev10")
+				lan_portid_range="2 5"	
+    		 	;;
+			*)
+				lan_portid_range="1 4"	
+			;;
+		esac
+                
+		for i in `seq ${lan_portid_range}`;do
+			link_status=`ssdk_sh port linkstatus get $i | grep 'SSDK Init OK!' | awk -F ':' '{print $2}'`
+			if [ "${link_status}" = "ENABLE" ];then
+				/usr/sbin/ssdk_sh port autoNeg restart $i > /dev/null 2>&1 &
+			fi
+                done
+}
+
+[ "$ACTION" = ifup ] || exit 0
+
+/etc/init.d/dnsmasq enabled && /etc/init.d/dnsmasq start

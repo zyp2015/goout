@@ -1,0 +1,79 @@
+--- dnsmasq-2.78.org/src/dhcp.c	2018-01-04 16:18:57.392596240 +0800
++++ dnsmasq-2.78/src/dhcp.c	2018-01-04 17:46:11.584338402 +0800
+@@ -131,6 +131,29 @@
+ #endif  
+ }
+ 
++#ifdef SKYSOFT_TR_SUPPORT
++void SaveOptions(struct in_addr ciaddr, const unsigned char* buffer, int length)   
++{   
++    int cnt;
++       char filename[32] = {0};
++       FILE *fp = NULL;
++       
++       sprintf(filename, "/tmp/%s", inet_ntoa(ciaddr));
++       printf("filename: %s\n", filename);
++
++       fp = fopen(filename, "w");
++
++       if(fp != NULL)
++       {
++               for (cnt=0; cnt<length; cnt++)   
++               {       
++                       fprintf(fp, "%02x", buffer[cnt]);
++               }
++               fclose(fp);
++       }
++}   
++#endif  
++
+ void dhcp_packet(time_t now, int pxe_fd)
+ {
+   int fd = pxe_fd ? daemon->pxefd : daemon->dhcpfd;
+@@ -154,6 +177,11 @@
+   struct arpreq arp_req;
+   struct timeval tv;
+ #endif
++
++#ifdef SKYSOFT_TR_SUPPORT
++       unsigned char options[312];
++       int renewflag = 0;
++#endif
+   
+   union {
+     struct cmsghdr align; /* this ensures alignment */
+@@ -342,6 +370,20 @@
+       if (!daemon->dhcp)
+ 	return;
+ 
++#ifdef SKYSOFT_TR_SUPPORT
++       mess = (struct dhcp_packet *)daemon->dhcp_packet.iov_base;
++       if (mess->ciaddr.s_addr != 0)
++       {
++               SaveOptions(mess->ciaddr, mess->options, sizeof(mess->options));
++       }
++       else
++       {
++               renewflag = 1;
++               //strncpy(options, mess->options, sizeof(options));
++               memcpy(options, mess->options, sizeof(options));
++       }
++#endif
++
+       lease_prune(NULL, now); /* lose any expired leases */
+       iov.iov_len = dhcp_reply(parm.current, ifr.ifr_name, iface_index, (size_t)sz, 
+ 			       now, unicast_dest, loopback, &is_inform, pxe_fd, iface_addr, recvtime);
+@@ -365,6 +407,13 @@
+ #ifdef HAVE_SOCKADDR_SA_LEN
+   dest.sin_len = sizeof(struct sockaddr_in);
+ #endif
++
++#ifdef SKYSOFT_TR_SUPPORT
++       if(renewflag == 1)
++       {
++               SaveOptions(mess->yiaddr, options, sizeof(options));
++       }
++#endif
+   
+   if (pxe_fd)
+     { 
